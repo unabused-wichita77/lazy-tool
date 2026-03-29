@@ -1,0 +1,2 @@
+# Groq agent + MCP client (streamable HTTP + stdio) for run_groq_benchmark_v2.py
+pydantic-ai-slim[groq,mcp]

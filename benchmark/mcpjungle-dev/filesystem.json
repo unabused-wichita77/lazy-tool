@@ -1,0 +1,7 @@
+{
+  "name": "filesystem",
+  "transport": "stdio",
+  "description": "Filesystem MCP (narrow to a throwaway dir)",
+  "command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp/lazy-tool-mcpjungle-fs"]
+}

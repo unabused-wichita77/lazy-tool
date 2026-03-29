@@ -1,0 +1,7 @@
+{
+  "name": "everything",
+  "transport": "stdio",
+  "description": "MCP reference server (tools, prompts, resources)",
+  "command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-everything"]
+}

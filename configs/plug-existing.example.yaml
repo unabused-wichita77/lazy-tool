@@ -1,0 +1,24 @@
+# Example: plug lazy-tool into MCPs you ALREADY run — no preset npx servers required.
+# Copy snippets into your real config (or merge with storage/summary/embeddings from example.yaml).
+#
+# Docs: docs/plugging-existing-mcps.md
+
+# sources:
+#   # HTTP MCP already listening (gateway, Docker port-forward, local dev server, …)
+#   - id: acme-http
+#     type: gateway
+#     transport: http
+#     url: http://127.0.0.1:8811/mcp
+#
+#   # Same stdio server you configured in the IDE — lazy-tool spawns its own process;
+#   # your editor config can stay as-is.
+#   - id: acme-stdio
+#     type: server
+#     transport: stdio
+#     command: npx
+#     args: ["-y", "@your-scope/your-server"]
+#
+#   - id: another-http
+#     type: gateway
+#     transport: http
+#     url: http://127.0.0.1:9000/some/mcp/path

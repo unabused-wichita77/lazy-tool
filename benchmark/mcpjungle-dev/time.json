@@ -1,0 +1,7 @@
+{
+  "name": "time",
+  "transport": "stdio",
+  "description": "Time MCP (requires uvx on PATH)",
+  "command": "uvx",
+  "args": ["mcp-server-time"]
+}

@@ -1,0 +1,455 @@
+package search
+
+import (
+	"context"
+	"errors"
+	"sort"
+	"strings"
+
+	"lazy-tool/internal/embeddings"
+	"lazy-tool/internal/metrics"
+	"lazy-tool/internal/ranking"
+	"lazy-tool/internal/storage"
+	"lazy-tool/internal/vector"
+	"lazy-tool/pkg/models"
+)
+
+// defaultEmptyQueryIDBatch limits rows loaded at once for empty-needle search (ordering matches ListAll).
+const defaultEmptyQueryIDBatch = 128
+
+type Service struct {
+	Store       *storage.SQLiteStore
+	Vec         *vector.Index
+	Embed       embeddings.Embedder
+	Ranker      ranking.Ranker
+	Weights     ScoreWeights
+	LexicalOnly bool
+	// FullCatalogSubstring enables SQL substring matching on search_text when FTS did not already return rows (default true).
+	FullCatalogSubstring bool
+	// EmptyQueryIDBatch overrides defaultEmptyQueryIDBatch when > 0.
+	EmptyQueryIDBatch int
+	// EmptyQueryMaxCatalogIDs caps IDs processed for '' query when > 0 (stable order).
+	EmptyQueryMaxCatalogIDs int
+}
+
+func NewService(store *storage.SQLiteStore, vec *vector.Index, emb embeddings.Embedder, weights ScoreWeights, lexicalOnly bool) *Service {
+	return &Service{
+		Store:                store,
+		Vec:                  vec,
+		Embed:                emb,
+		Ranker:               ranking.Default{},
+		Weights:              MergeScoreWeights(weights),
+		LexicalOnly:          lexicalOnly,
+		FullCatalogSubstring: true,
+	}
+}
+
+func sourceAllowed(sourceID string, filter []string) bool {
+	if len(filter) == 0 {
+		return true
+	}
+	for _, id := range filter {
+		if id == sourceID {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) Search(ctx context.Context, q models.SearchQuery) (models.RankedResults, error) {
+	tokens := tokenize(q.Text)
+	needle := strings.ToLower(strings.TrimSpace(q.Text))
+
+	lexical := s.LexicalOnly || q.LexicalOnly
+	qEmb := q.Embedding
+	if !lexical && !q.HasEmbedding && s.Embed != nil && needle != "" {
+		vecs, err := s.Embed.Embed(ctx, []string{q.Text})
+		if err == nil && len(vecs) > 0 && len(vecs[0]) > 0 {
+			qEmb = vecs[0]
+		}
+	}
+
+	var vecHits map[string]float32
+	if !lexical && len(qEmb) > 0 && s.Vec != nil {
+		n := q.Limit * 15
+		if n < 40 {
+			n = 40
+		}
+		filterID := ""
+		if len(q.SourceIDs) == 1 {
+			filterID = q.SourceIDs[0]
+		}
+		res, err := VectorQuery(ctx, s.Vec, qEmb, n, filterID)
+		if err != nil {
+			if errors.Is(err, vector.ErrClosed) {
+				return models.RankedResults{}, err
+			}
+			// Other chromem/query failures: omit vector leg (legacy lenient behavior).
+		} else {
+			vecHits = vector.ScoreMap(res)
+		}
+	}
+
+	wt := s.Weights
+
+	// Empty query: same behavior as legacy — scan full catalog; only vector (and token-less lexical) score.
+	if needle == "" {
+		return s.searchEmptyQuery(ctx, q, tokens, vecHits, wt)
+	}
+
+	candidateIDs, candidatePath, err := s.buildCandidates(ctx, q, needle, vecHits)
+	if err != nil {
+		return models.RankedResults{}, err
+	}
+	if len(candidateIDs) == 0 {
+		metrics.SearchExecuted(0)
+		return models.RankedResults{CandidatePath: candidatePath}, nil
+	}
+
+	byID, err := s.Store.GetCapabilitiesByIDs(ctx, candidateIDs)
+	if err != nil {
+		return models.RankedResults{}, err
+	}
+
+	var results []models.SearchResult
+	for _, id := range candidateIDs {
+		rec, ok := byID[id]
+		if !ok {
+			continue
+		}
+		if !sourceAllowed(rec.SourceID, q.SourceIDs) {
+			continue
+		}
+		r := rec
+		var sc float64
+		var why []string
+		var bd map[string]float64
+		if q.ExplainScores {
+			bd = make(map[string]float64)
+		}
+		addBD := func(key string, delta float64) {
+			if bd == nil || delta == 0 {
+				return
+			}
+			bd[key] += delta
+		}
+		if needle != "" {
+			if r.CanonicalName == needle {
+				sc += wt.ExactCanonical
+				addBD("exact_canonical", wt.ExactCanonical)
+				why = append(why, "exact:canonical")
+			} else if strings.EqualFold(r.OriginalName, needle) {
+				sc += wt.ExactName
+				addBD("exact_name", wt.ExactName)
+				why = append(why, "exact:name")
+			} else if strings.Contains(r.SearchText, needle) {
+				sc += wt.Substring
+				addBD("substring", wt.Substring)
+				why = append(why, "text:substring")
+			}
+		}
+		ls, wLex := scoreLexical(needle, tokens, &r)
+		sc += ls
+		addBD("lexical", ls)
+		why = mergeWhyUnique(why, wLex)
+		if vecHits != nil {
+			if v, ok := vecHits[r.ID]; ok {
+				nv := normalizeCosine(v)
+				vecPts := nv * wt.VectorMultiplier
+				sc += vecPts
+				addBD("vector", vecPts)
+				why = append(why, "vector:similarity")
+			}
+		}
+		if u, wu := userSummaryWeight(wt, &r); u > 0 {
+			sc += u
+			addBD("user_summary", u)
+			why = mergeWhyUnique(why, wu)
+		}
+		if f, wf := favoriteWeight(wt, q, &r); f > 0 {
+			sc += f
+			addBD("favorite", f)
+			why = mergeWhyUnique(why, wf)
+		}
+		if sc <= 0 {
+			continue
+		}
+		sr := models.SearchResult{
+			Kind:          r.Kind,
+			ProxyToolName: r.CanonicalName,
+			SourceID:      r.SourceID,
+			Summary:       r.EffectiveSummary(),
+			Score:         sc,
+			WhyMatched:    why,
+			CapabilityID:  r.ID,
+		}
+		if len(bd) > 0 {
+			sr.ScoreBreakdown = bd
+		}
+		results = append(results, sr)
+	}
+	rawByCap := map[string]float64{}
+	if q.ExplainScores {
+		for _, r := range results {
+			rawByCap[r.CapabilityID] = r.Score
+		}
+	}
+	ranked, err := s.Ranker.Rank(ctx, q, results)
+	if err != nil {
+		return ranked, err
+	}
+	if q.ExplainScores && len(ranked.Results) > 0 {
+		scaleScoreBreakdownsAfterRank(ranked.Results, rawByCap)
+	}
+	ranked.CandidatePath = candidatePath
+	if q.GroupBySource && len(ranked.Results) > 0 {
+		ranked.Grouped = GroupResultsBySource(ranked.Results)
+	}
+	metrics.SearchExecuted(len(ranked.Results))
+	return ranked, nil
+}
+
+func userSummaryWeight(wt ScoreWeights, r *models.CapabilityRecord) (float64, []string) {
+	if strings.TrimSpace(r.UserSummary) == "" || wt.UserSummary <= 0 {
+		return 0, nil
+	}
+	return wt.UserSummary, []string{"user:edited-summary"}
+}
+
+func favoriteWeight(wt ScoreWeights, q models.SearchQuery, r *models.CapabilityRecord) (float64, []string) {
+	if q.FavoriteIDs == nil || wt.Favorite <= 0 {
+		return 0, nil
+	}
+	if _, ok := q.FavoriteIDs[r.ID]; !ok {
+		return 0, nil
+	}
+	return wt.Favorite, []string{"user:favorite"}
+}
+
+func (s *Service) searchEmptyQuery(ctx context.Context, q models.SearchQuery, tokens []string, vecHits map[string]float32, wt ScoreWeights) (models.RankedResults, error) {
+	ids, err := s.Store.ListAllIDs(ctx)
+	if err != nil {
+		return models.RankedResults{}, err
+	}
+	totalCatalog := len(ids)
+	truncated := false
+	if s.EmptyQueryMaxCatalogIDs > 0 && len(ids) > s.EmptyQueryMaxCatalogIDs {
+		ids = ids[:s.EmptyQueryMaxCatalogIDs]
+		truncated = true
+	}
+	metrics.SearchEmptyQueryScan(totalCatalog, len(ids), truncated)
+	batch := defaultEmptyQueryIDBatch
+	if s.EmptyQueryIDBatch > 0 {
+		batch = s.EmptyQueryIDBatch
+	}
+	var results []models.SearchResult
+	for i := 0; i < len(ids); i += batch {
+		j := min(i+batch, len(ids))
+		chunk := ids[i:j]
+		byID, err := s.Store.GetCapabilitiesByIDs(ctx, chunk)
+		if err != nil {
+			return models.RankedResults{}, err
+		}
+		for _, id := range chunk {
+			rec, ok := byID[id]
+			if !ok {
+				continue
+			}
+			if !sourceAllowed(rec.SourceID, q.SourceIDs) {
+				continue
+			}
+			r := rec
+			var sc float64
+			var why []string
+			var bd map[string]float64
+			if q.ExplainScores {
+				bd = make(map[string]float64)
+			}
+			addBD := func(key string, delta float64) {
+				if bd == nil || delta == 0 {
+					return
+				}
+				bd[key] += delta
+			}
+			ls, wLex := scoreLexical("", tokens, &r)
+			sc += ls
+			addBD("lexical", ls)
+			why = mergeWhyUnique(why, wLex)
+			if vecHits != nil {
+				if v, ok := vecHits[r.ID]; ok {
+					nv := normalizeCosine(v)
+					vecPts := nv * wt.VectorMultiplier
+					sc += vecPts
+					addBD("vector", vecPts)
+					why = append(why, "vector:similarity")
+				}
+			}
+			if u, wu := userSummaryWeight(wt, &r); u > 0 {
+				sc += u
+				addBD("user_summary", u)
+				why = mergeWhyUnique(why, wu)
+			}
+			if f, wf := favoriteWeight(wt, q, &r); f > 0 {
+				sc += f
+				addBD("favorite", f)
+				why = mergeWhyUnique(why, wf)
+			}
+			if sc <= 0 {
+				continue
+			}
+			sr := models.SearchResult{
+				Kind:          r.Kind,
+				ProxyToolName: r.CanonicalName,
+				SourceID:      r.SourceID,
+				Summary:       r.EffectiveSummary(),
+				Score:         sc,
+				WhyMatched:    why,
+				CapabilityID:  r.ID,
+			}
+			if len(bd) > 0 {
+				sr.ScoreBreakdown = bd
+			}
+			results = append(results, sr)
+		}
+	}
+	rawByCap := map[string]float64{}
+	if q.ExplainScores {
+		for _, r := range results {
+			rawByCap[r.CapabilityID] = r.Score
+		}
+	}
+	ranked, err := s.Ranker.Rank(ctx, q, results)
+	if err != nil {
+		return ranked, err
+	}
+	if q.ExplainScores && len(ranked.Results) > 0 {
+		scaleScoreBreakdownsAfterRank(ranked.Results, rawByCap)
+	}
+	if truncated {
+		ranked.CandidatePath = models.SearchCandidatePathEmptyQueryTruncated
+	} else {
+		ranked.CandidatePath = models.SearchCandidatePathEmptyQueryFullCatalog
+	}
+	if q.GroupBySource && len(ranked.Results) > 0 {
+		ranked.Grouped = GroupResultsBySource(ranked.Results)
+	}
+	metrics.SearchExecuted(len(ranked.Results))
+	return ranked, nil
+}
+
+func (s *Service) buildCandidates(ctx context.Context, q models.SearchQuery, needle string, vecHits map[string]float32) ([]string, string, error) {
+	seen := make(map[string]struct{})
+	var out []string
+	add := func(id string) {
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+
+	if rec, err := s.Store.GetByCanonicalName(ctx, needle); err == nil {
+		if sourceAllowed(rec.SourceID, q.SourceIDs) {
+			add(rec.ID)
+		}
+	}
+
+	origIDs, err := s.Store.ListIDsByOriginalNameFold(ctx, needle, q.SourceIDs)
+	if err != nil {
+		return nil, "", err
+	}
+	for _, id := range origIDs {
+		add(id)
+	}
+
+	ftsLimit := q.Limit * 15
+	if ftsLimit < 40 {
+		ftsLimit = 40
+	}
+	match := storage.BuildFTSMatchQuery(q.Text)
+	ftsIDs, err := s.Store.SearchFTSCandidateIDs(ctx, match, q.SourceIDs, ftsLimit)
+	if err != nil {
+		return nil, "", err
+	}
+	for _, id := range ftsIDs {
+		add(id)
+	}
+
+	if len(vecHits) > 0 {
+		type pair struct {
+			id  string
+			sim float32
+		}
+		var pairs []pair
+		for id, v := range vecHits {
+			pairs = append(pairs, pair{id: id, sim: v})
+		}
+		sort.Slice(pairs, func(i, j int) bool {
+			return pairs[i].sim > pairs[j].sim
+		})
+		ids := make([]string, 0, len(pairs))
+		for _, p := range pairs {
+			ids = append(ids, p.id)
+		}
+		byID, err := s.Store.GetCapabilitiesByIDs(ctx, ids)
+		if err != nil {
+			return nil, "", err
+		}
+		for _, p := range pairs {
+			rec, ok := byID[p.id]
+			if !ok {
+				continue
+			}
+			if sourceAllowed(rec.SourceID, q.SourceIDs) {
+				add(p.id)
+			}
+		}
+	}
+
+	// Substring scan over the full catalog: only when FTS did not already return hits.
+	// If BM25 returned candidates, repeating a per-row substring pass is redundant for normal queries.
+	if match != "" && len(ftsIDs) > 0 {
+		metrics.SearchCandidateGeneration(models.SearchCandidatePathSubstringSkippedFTSHit)
+		return out, models.SearchCandidatePathSubstringSkippedFTSHit, nil
+	}
+
+	if !s.FullCatalogSubstring {
+		metrics.SearchCandidateGeneration(models.SearchCandidatePathFullCatalogSubstringDisabled)
+		return out, models.SearchCandidatePathFullCatalogSubstringDisabled, nil
+	}
+
+	subPath := models.SearchCandidatePathSubstringFullCatalogFTSZeroRows
+	if match == "" {
+		subPath = models.SearchCandidatePathSubstringFullCatalogNoFTSMatch
+	}
+	metrics.SearchCandidateGeneration(subPath)
+	subIDs, err := s.Store.ListIDsBySearchTextSubstring(ctx, needle, q.SourceIDs)
+	if err != nil {
+		return nil, "", err
+	}
+	for _, id := range subIDs {
+		add(id)
+	}
+
+	return out, subPath, nil
+}
+
+func mergeWhyUnique(prefix []string, extra []string) []string {
+	seen := make(map[string]struct{}, len(prefix)+len(extra))
+	var out []string
+	for _, w := range prefix {
+		if _, ok := seen[w]; ok {
+			continue
+		}
+		seen[w] = struct{}{}
+		out = append(out, w)
+	}
+	for _, w := range extra {
+		if _, ok := seen[w]; ok {
+			continue
+		}
+		seen[w] = struct{}{}
+		out = append(out, w)
+	}
+	return out
+}

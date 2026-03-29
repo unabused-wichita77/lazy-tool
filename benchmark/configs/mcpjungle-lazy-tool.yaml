@@ -1,0 +1,38 @@
+# lazy-tool → MCPJungle (local): single HTTP source = Jungle's aggregated gateway.
+#
+# Prerequisites:
+#   1. MCPJungle running (e.g. docker compose per https://github.com/mcpjungle/MCPJungle )
+#   2. Sample MCPs registered via `mcpjungle register` (see benchmark/mcpjungle-dev/)
+#
+#   export LAZY_TOOL_CONFIG=$PWD/benchmark/configs/mcpjungle-lazy-tool.yaml
+#   ./bin/lazy-tool reindex && ./bin/lazy-tool search "read" --limit 10
+#
+# Default Jungle dev gateway (verify port): http://localhost:8080/mcp
+
+app:
+  name: lazy-tool-mcpjungle-dev
+  environment: development
+
+storage:
+  sqlite_path: /tmp/mcpjungle-dev.db
+  vector_path: /tmp/mcpjungle-dev-vector
+
+summary:
+  enabled: false
+  provider: openai-compatible
+  model: gpt-4.1-mini
+  base_url: https://api.openai.com/v1
+  api_key_env: OPENAI_API_KEY
+
+embeddings:
+  provider: noop
+  model: ""
+  base_url: ""
+  api_key_env: ""
+
+sources:
+  - id: mcpjungle
+    type: gateway
+    transport: http
+    # Tool group experiment (optional): use Jungle's group URL instead of main /mcp
+    url: http://127.0.0.1:8080/mcp

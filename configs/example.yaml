@@ -1,0 +1,60 @@
+# Plug lazy-tool into MCPs you already use: set `sources` to your HTTP URLs and/or
+# the same stdio command+args as in your IDE (docs/plugging-existing-mcps.md).
+
+app:
+  name: lazy-tool
+  environment: development
+
+server:
+  mcp:
+    transport: stdio
+    host: localhost
+    port: 8080
+
+storage:
+  sqlite_path: ./data/lazy-tool.db
+  vector_path: ./data/vector
+  # history_path: ./data/search_history.log   # optional: append search queries (CLI/Web/MCP)
+
+summary:
+  provider: openai-compatible
+  model: gpt-4.1-mini
+  enabled: false
+  base_url: https://api.openai.com/v1
+  api_key_env: OPENAI_API_KEY
+
+embeddings:
+  provider: noop
+  model: ""
+  base_url: http://127.0.0.1:11434
+  api_key_env: ""
+
+# connectors:
+#   http_reuse_upstream_session: false   # when true, HTTP MCP sources reuse one session until idle TTL, error, or process exit (stdio still one process per call)
+#   http_reuse_idle_timeout_seconds: 0   # optional: close reused HTTP session after this many seconds idle (0 = no idle timeout; only when reuse is true)
+# Env: LAZY_TOOL_UPSTREAM_MCP_DEBUG=1 logs upstream session connect/reuse/idle-recycle (stderr via standard log package).
+
+# Optional hybrid search tuning (omit for defaults). See internal/search/weights.go.
+# search:
+#   lexical_only: false          # when true, skip embeddings + vector retrieval (P2.4)
+#   disable_full_catalog_substring: false   # when true, skip SQL substring fallback on search_text if FTS returned no rows (degraded; faster)
+#   empty_query_id_batch: 128             # 0 = default; SQLite batch size for '' (empty) search needle
+#   empty_query_max_catalog_ids: 0          # 0 = scan full catalog; >0 caps IDs considered (stable order; CandidatePath shows truncation)
+#   anthropic_tool_refs: false   # when true, search_tools adds anthropic.suggested_tool_use per hit
+#   aliases:                     # exact query -> replacement before search (P2.3)
+#     short: "my long query"
+#   scoring:
+#     exact_canonical: 10
+#     exact_name: 8
+#     substring: 2
+#     vector_multiplier: 6
+#     user_summary: 0.25         # small boost when user edited summary (inspect override)
+#     favorite: 0.2              # boost for `lazy-tool pin add` capabilities
+
+sources:
+  - id: local-gateway
+    type: gateway
+    transport: http
+    url: http://localhost:8811/mcp
+    # disabled: true   # optional: exclude from indexing, proxy, and enabled-source lists (P2.3)
+    # adapter: default   # optional; only "default" is implemented today (docs/adr/0005)

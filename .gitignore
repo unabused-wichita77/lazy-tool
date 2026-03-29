@@ -1,0 +1,22 @@
+.spec/
+# Maintainer-only files under .private/ (audits, plans). README is committed as a pointer.
+.private/*
+!.private/README.md
+.work/
+.cursor/plans/
+/lazy-tool
+.lazy-tool/
+/bin/
+/data/
+*.db
+*.bak
+coverage.out
+coverage.html
+__pycache__/
+benchmark/.venv/
+./docker-compose.yaml
+a.sh
+op.txt
+op*.txt
+b.sh
+.DS_Store

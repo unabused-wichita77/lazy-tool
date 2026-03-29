@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>lazy-tool — benchmark visuals</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;1,7..72,400&family=Outfit:wght@400;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a222d;
+      --text: #e8e4dc;
+      --muted: #8a9bb0;
+      --accent-a: #5eead4;
+      --accent-b: #fbbf77;
+      --accent-c: #a78bfa;
+      --grid: rgba(232, 228, 220, 0.08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Outfit", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      background-image:
+        radial-gradient(ellipse 120% 80% at 10% -20%, rgba(94, 234, 212, 0.12), transparent 50%),
+        radial-gradient(ellipse 90% 60% at 100% 0%, rgba(167, 139, 250, 0.1), transparent 45%);
+    }
+    main {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 2.5rem 1.5rem 4rem;
+    }
+    h1 {
+      font-family: "Literata", Georgia, serif;
+      font-weight: 600;
+      font-size: clamp(1.75rem, 4vw, 2.25rem);
+      letter-spacing: -0.02em;
+      margin: 0 0 0.35rem;
+    }
+    .lede {
+      color: var(--muted);
+      font-size: 1rem;
+      line-height: 1.55;
+      max-width: 52ch;
+      margin: 0 0 2rem;
+    }
+    dl.meta {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 0.35rem 1.25rem;
+      font-size: 0.9rem;
+      margin: 0 0 2.5rem;
+      padding: 1rem 1.25rem;
+      background: var(--panel);
+      border-radius: 12px;
+      border: 1px solid var(--grid);
+    }
+    dt { color: var(--muted); font-weight: 600; }
+    dd { margin: 0; font-family: ui-monospace, monospace; font-size: 0.85rem; }
+    section.chart-card {
+      background: var(--panel);
+      border-radius: 14px;
+      border: 1px solid var(--grid);
+      padding: 1.25rem 1.25rem 1.5rem;
+      margin-bottom: 1.75rem;
+    }
+    section.chart-card h2 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin: 0 0 1rem;
+      color: var(--text);
+    }
+    .chart-wrap {
+      position: relative;
+      height: 280px;
+    }
+    footer {
+      margin-top: 2rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+    footer a { color: var(--accent-a); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Benchmark visuals</h1>
+    <p class="lede">
+      Charts derived from the <strong>Benchmark highlights</strong> section of the repository README.
+      Tables in the README remain the source of truth for exact figures.
+    </p>
+    <dl class="meta">
+      <dt>Snapshot date</dt><dd>2026-03-29</dd>
+      <dt>Model</dt><dd>llama-3.1-8b-instant</dd>
+      <dt>Repeats / task</dt><dd>20</dd>
+      <dt>Mode</dt><dd>direct MCPJungle vs lazy-tool stdio</dd>
+    </dl>
+
+    <section class="chart-card" aria-labelledby="h-tokens">
+      <h2 id="h-tokens">No-tool turn — average input tokens</h2>
+      <div class="chart-wrap"><canvas id="chartTokens" aria-label="Bar chart of input tokens"></canvas></div>
+    </section>
+
+    <section class="chart-card" aria-labelledby="h-latency">
+      <h2 id="h-latency">No-tool turn — average latency</h2>
+      <div class="chart-wrap"><canvas id="chartLatency" aria-label="Bar chart of latency in seconds"></canvas></div>
+    </section>
+
+    <section class="chart-card" aria-labelledby="h-discovery">
+      <h2 id="h-discovery">Discovery / search tasks — successes (of 20)</h2>
+      <div class="chart-wrap"><canvas id="chartDiscovery" aria-label="Bar and line chart of task successes"></canvas></div>
+    </section>
+
+    <footer>
+      Methodology and publishing rules: <a href="../benchmark/README.md">benchmark/README.md</a> (view in repo).
+    </footer>
+  </main>
+
+  <script>
+    Chart.defaults.color = "#8a9bb0";
+    Chart.defaults.borderColor = "rgba(232, 228, 220, 0.12)";
+    Chart.defaults.font.family = "'Outfit', system-ui, sans-serif";
+
+    const labelsBaseline = ["Direct MCP gateway", "lazy-tool stdio"];
+
+    new Chart(document.getElementById("chartTokens"), {
+      type: "bar",
+      data: {
+        labels: labelsBaseline,
+        datasets: [{
+          label: "Avg input tokens",
+          data: [1701, 915],
+          backgroundColor: ["rgba(251, 191, 119, 0.75)", "rgba(94, 234, 212, 0.75)"],
+          borderColor: ["#fbbf77", "#5eead4"],
+          borderWidth: 1,
+          borderRadius: 8,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => " " + ctx.raw + " tokens",
+            },
+          },
+        },
+        scales: {
+          x: { grid: { display: false } },
+          y: {
+            beginAtZero: true,
+            title: { display: true, text: "Tokens", color: "#8a9bb0" },
+            grid: { color: "rgba(232, 228, 220, 0.06)" },
+          },
+        },
+      },
+    });
+
+    new Chart(document.getElementById("chartLatency"), {
+      type: "bar",
+      data: {
+        labels: labelsBaseline,
+        datasets: [{
+          label: "Avg latency (s)",
+          data: [0.232, 0.158],
+          backgroundColor: ["rgba(251, 191, 119, 0.75)", "rgba(94, 234, 212, 0.75)"],
+          borderColor: ["#fbbf77", "#5eead4"],
+          borderWidth: 1,
+          borderRadius: 8,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => " " + ctx.raw + " s",
+            },
+          },
+        },
+        scales: {
+          x: { grid: { display: false } },
+          y: {
+            beginAtZero: true,
+            suggestedMax: 0.26,
+            title: { display: true, text: "Seconds", color: "#8a9bb0" },
+            grid: { color: "rgba(232, 228, 220, 0.06)" },
+          },
+        },
+      },
+    });
+
+    new Chart(document.getElementById("chartDiscovery"), {
+      data: {
+        labels: ["search_tools_smoke", "search_tools_resource", "search_tools_prompt"],
+        datasets: [
+          {
+            type: "bar",
+            label: "Success count (bar)",
+            data: [20, 18, 16],
+            backgroundColor: "rgba(167, 139, 250, 0.5)",
+            borderColor: "#a78bfa",
+            borderWidth: 1,
+            borderRadius: 6,
+            order: 2,
+          },
+          {
+            type: "line",
+            label: "Trend (line)",
+            data: [20, 18, 16],
+            borderColor: "#5eead4",
+            backgroundColor: "rgba(94, 234, 212, 0.15)",
+            borderWidth: 2,
+            tension: 0.35,
+            fill: false,
+            pointRadius: 5,
+            pointBackgroundColor: "#5eead4",
+            order: 1,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            labels: { color: "#e8e4dc", usePointStyle: true },
+          },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => " " + ctx.dataset.label + ": " + ctx.raw + " / 20",
+            },
+          },
+        },
+        scales: {
+          x: { grid: { display: false }, ticks: { maxRotation: 45, minRotation: 25 } },
+          y: {
+            beginAtZero: true,
+            max: 22,
+            ticks: { stepSize: 5 },
+            title: { display: true, text: "Successful runs", color: "#8a9bb0" },
+            grid: { color: "rgba(232, 228, 220, 0.06)" },
+          },
+        },
+      },
+    });
+  </script>
+</body>
+</html>
