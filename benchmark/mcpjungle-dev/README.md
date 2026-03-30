@@ -3,6 +3,7 @@
 ## Table of contents
 
 - [What this folder is for](#what-this-folder-is-for)
+- [Install and start MCPJungle](#install-and-start-mcpjungle)
 - [Register sample servers](#register-sample-servers)
 - [Recommended flow](#recommended-flow)
 - [Troubleshooting](#troubleshooting)
@@ -18,6 +19,26 @@ Use it when you want a reproducible local setup for:
 - benchmark runs against a merged local MCP gateway
 
 For the main benchmark methodology, see [../README.md](../README.md).
+
+## Install and start MCPJungle
+
+This repo expects MCPJungle's HTTP gateway at `http://127.0.0.1:8080/mcp`.
+
+Install MCPJungle using the official docs:
+
+- GitHub: [mcpjungle/MCPJungle](https://github.com/mcpjungle/MCPJungle)
+
+Start MCPJungle locally (development mode):
+
+```bash
+mcpjungle start --port 8080
+```
+
+Quick check (in a second terminal):
+
+```bash
+curl -sS http://127.0.0.1:8080/mcp >/dev/null && echo "MCPJungle is up"
+```
 
 ## Register sample servers
 

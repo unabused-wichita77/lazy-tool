@@ -66,7 +66,7 @@ Requires Python 3.11+. Install with [uv](https://docs.astral.sh/uv/) (recommende
 
 ```bash
 # using uv
-uv pip install -r benchmark/requirements.txt
+uv pip install --python benchmark/.venv/bin/python -r benchmark/requirements.txt
 
 # or using pip
 pip install -r benchmark/requirements.txt
