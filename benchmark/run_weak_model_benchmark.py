@@ -570,35 +570,77 @@ async def _run_search_precision(
 
             started = time.perf_counter()
             try:
-                result = await server.call_tool(
-                    "search_tools",
-                    {"query": query, "limit": 3},
-                )
+                # Deterministic Tier 3: bypass Agent execution and call the MCP tool directly.
+                # Newer PydanticAI versions require (ctx, tool) for call_tool(), so use
+                # direct_call_tool() when available.
+                if hasattr(server, "direct_call_tool"):
+                    result = await server.direct_call_tool(
+                        "search_tools",
+                        {"query": query, "limit": 3},
+                    )
+                else:
+                    # Back-compat for older PydanticAI versions.
+                    result = await server.call_tool(
+                        "search_tools",
+                        {"query": query, "limit": 3},
+                    )
                 duration_s = round(time.perf_counter() - started, 3)
 
                 # Parse results from the MCP response
+                # direct_call_tool() may return structured Python objects (dict/list),
+                # not an MCP SDK response object with `.content`.
+                parsed_obj: object | None = None
                 result_text = ""
-                if hasattr(result, "content"):
+                if isinstance(result, (dict, list)):
+                    parsed_obj = result
+                    try:
+                        result_text = json.dumps(result, ensure_ascii=False)
+                    except Exception:
+                        result_text = str(result)
+                elif hasattr(result, "content"):
                     for part in result.content:
                         if hasattr(part, "text"):
                             result_text += part.text
                 elif isinstance(result, str):
                     result_text = result
+                else:
+                    result_text = str(result)
 
                 # Try to parse as JSON to extract tool names
                 tool_names_found: list[str] = []
                 try:
-                    parsed = json.loads(result_text)
+                    parsed = parsed_obj if parsed_obj is not None else json.loads(result_text)
                     if isinstance(parsed, list):
                         for item in parsed:
-                            name = item.get("proxy_tool_name", "") or item.get("name", "")
+                            if not isinstance(item, dict):
+                                continue
+                            name = (
+                                item.get("proxy_tool_name", "")
+                                or item.get("proxyToolName", "")
+                                or item.get("tool_name", "")
+                                or item.get("toolName", "")
+                                or item.get("name", "")
+                                or item.get("id", "")
+                            )
                             if name:
                                 tool_names_found.append(name.lower())
                     elif isinstance(parsed, dict):
-                        results_list = parsed.get("results", parsed.get("tools", []))
+                        results_list = parsed.get(
+                            "results",
+                            parsed.get("hits", parsed.get("tools", parsed.get("items", []))),
+                        )
                         if isinstance(results_list, list):
                             for item in results_list:
-                                name = item.get("proxy_tool_name", "") or item.get("name", "")
+                                if not isinstance(item, dict):
+                                    continue
+                                name = (
+                                    item.get("proxy_tool_name", "")
+                                    or item.get("proxyToolName", "")
+                                    or item.get("tool_name", "")
+                                    or item.get("toolName", "")
+                                    or item.get("name", "")
+                                    or item.get("id", "")
+                                )
                                 if name:
                                     tool_names_found.append(name.lower())
                 except (json.JSONDecodeError, TypeError):
