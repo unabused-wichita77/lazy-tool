@@ -40,7 +40,12 @@ func tagsJoined(rec models.CapabilityRecord) string {
 	return strings.Join(rec.Tags, " ")
 }
 
-// ftsTokenize splits a query into FTS-safe tokens (letters/digits runs, min length 2). Aligns with search tokenization.
+// ftsTokenize splits a query into FTS-safe tokens (letters/digits runs, min length 2).
+// Single-char tokens are dropped because they produce excessive FTS matches across the
+// entire catalog without adding discriminative value. The FTS5 porter unicode61 tokenizer
+// does index single-char tokens, but querying on them returns too many false positives.
+// When ftsTokenize returns no tokens (e.g. single-letter query), BuildFTSMatchQuery returns
+// "" and the search pipeline falls back to substring scan, which handles short queries fine.
 func ftsTokenize(s string) []string {
 	s = strings.ToLower(s)
 	var cur strings.Builder

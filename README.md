@@ -32,7 +32,7 @@ Several projects address MCP tool sprawl in different ways: [RAG-MCP](https://gi
 
 - **No infrastructure.** One Go binary, local SQLite. No Docker, no vector DB service, no cloud account.
 - **IDE auto-import.** Reads your Claude Desktop, Cursor, or VS Code MCP config. No manual YAML unless you want it.
-- **Three modes in one tool.** Search mode (5 meta-tools) for weak models, direct mode (transparent proxy) for strong models, hybrid for both. Switch with a flag.
+- **Three modes in one tool.** Direct mode (transparent proxy) for simple setups and smaller models, search mode (5 meta-tools) for large catalogs with strong models, hybrid for both. Switch with a flag.
 - **Provider-agnostic.** Not tied to Anthropic, OpenAI, or any specific client. Anything that speaks MCP over stdio or HTTP.
 - **Reliability built in.** Circuit breaking, caching, session reuse, and tracing handled at the proxy layer.
 
@@ -89,11 +89,11 @@ No IDE config? Write a YAML file manually — see [Configuration](#configuration
 
 ## When to use which mode
 
-- **Search mode** (default) — the agent sees 5 meta-tools and discovers capabilities through search. Reduces prompt size and improves tool selection for smaller/cheaper models (Haiku, GPT-4.1-mini, local Ollama).
+- **Direct mode** — every cataloged tool is exposed by name. The agent sees real schemas, lazy-tool routes transparently. Best for smaller/cheaper models (Haiku, GPT-4.1-mini, local Ollama) that struggle with multi-step reasoning. They get a simple tool list and call tools directly — one step, no search overhead. Also good for strong models that benefit from single-endpoint aggregation, circuit breaking, and caching.
 
-- **Direct mode** — every cataloged tool is exposed by name. The agent sees real schemas, lazy-tool routes transparently. For strong models that handle large tool lists fine but benefit from single-endpoint aggregation, circuit breaking, and caching.
+- **Search mode** (default) — the agent sees 5 meta-tools and discovers capabilities through search. Best for strong models (Claude, GPT-4, Llama 70B+) working with large tool catalogs (50+ tools) where dumping every schema into context wastes tokens and degrades selection accuracy. Requires the model to handle a two-step search→invoke pattern.
 
-- **Hybrid mode** — both search and direct tools available. Useful for gradual migration.
+- **Hybrid mode** — both search and direct tools available. Useful for gradual migration or mixed workloads.
 
 ```bash
 lazy-tool serve                  # search (default)

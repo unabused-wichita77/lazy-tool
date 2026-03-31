@@ -21,9 +21,9 @@ func TestSearch_candidatePath_substringMatrix(t *testing.T) {
 	}
 	rows := []row{
 		{
-			name:  "fts_hit_skips_full_substring_scan",
+			name:  "fts_sparse_augments_with_substring",
 			query: "create github issue",
-			want:  models.SearchCandidatePathSubstringSkippedFTSHit,
+			want:  models.SearchCandidatePathSubstringAugmentedFTSSparse,
 			fixture: models.CapabilityRecord{
 				ID: "1", Kind: models.CapabilityKindTool, SourceID: "github-gateway", SourceType: "gateway",
 				CanonicalName: "github_gateway__create_issue", OriginalName: "create_issue",
@@ -56,6 +56,46 @@ func TestSearch_candidatePath_substringMatrix(t *testing.T) {
 			},
 		},
 	}
+
+	// When limit=1 and FTS returns 1 hit, substring scan is skipped (FTS has enough).
+	t.Run("fts_sufficient_skips_substring", func(t *testing.T) {
+		var mode string
+		prev := metrics.SearchCandidateGeneration
+		metrics.SearchCandidateGeneration = func(m string) { mode = m }
+		defer func() { metrics.SearchCandidateGeneration = prev }()
+
+		p := filepath.Join(t.TempDir(), "substr.db")
+		st, err := storage.OpenSQLite(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = st.Close() }()
+		ctx := context.Background()
+		rec := models.CapabilityRecord{
+			ID: "s1", Kind: models.CapabilityKindTool, SourceID: "github-gateway", SourceType: "gateway",
+			CanonicalName: "github_gateway__create_issue", OriginalName: "create_issue",
+			OriginalDescription: "Create an issue in a repo",
+			GeneratedSummary:    "Creates GitHub issues with title and body.",
+			SearchText:          "github-gateway create_issue repo title body issue",
+			VersionHash:         "h1", LastSeenAt: time.Now(),
+			InputSchemaJSON:     "{}", MetadataJSON: "{}",
+		}
+		if err := st.UpsertCapability(ctx, rec); err != nil {
+			t.Fatal(err)
+		}
+		svc := NewService(st, nil, embeddings.Noop{}, ScoreWeights{}, false)
+		// limit=1: FTS returns 1 hit which is >= limit, so substring is skipped
+		ranked, err := svc.Search(ctx, models.SearchQuery{Text: "create github issue", Limit: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if mode != models.SearchCandidatePathSubstringSkippedFTSHit {
+			t.Fatalf("metrics path: got %q want %q", mode, models.SearchCandidatePathSubstringSkippedFTSHit)
+		}
+		if ranked.CandidatePath != models.SearchCandidatePathSubstringSkippedFTSHit {
+			t.Fatalf("CandidatePath: got %q want %q", ranked.CandidatePath, models.SearchCandidatePathSubstringSkippedFTSHit)
+		}
+	})
 
 	for _, tc := range rows {
 		t.Run(tc.name, func(t *testing.T) {

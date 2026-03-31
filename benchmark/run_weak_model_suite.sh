@@ -28,6 +28,7 @@ LAZY_CONFIG=""
 JUNGLE_URL="http://127.0.0.1:8080/mcp"
 OLLAMA_URL="http://localhost:11434"
 SKIP_BUILD="false"
+SKIP_PREFLIGHT="false"
 MODELS=""
 TIER=""
 
@@ -40,6 +41,7 @@ while [[ $# -gt 0 ]]; do
     --jungle-url)     JUNGLE_URL="${2:?missing value}"; shift 2 ;;
     --ollama-url)     OLLAMA_URL="${2:?missing value}"; shift 2 ;;
     --skip-build)     SKIP_BUILD="true"; shift ;;
+    --skip-preflight) SKIP_PREFLIGHT="true"; shift ;;
     --models)         MODELS="${2:?missing value}"; shift 2 ;;
     --tier)           TIER="${2:?missing value}"; shift 2 ;;
     *)
@@ -124,6 +126,40 @@ LAZY_TOOL_CONFIG="$LAZY_CONFIG" "$LAZY_BINARY" reindex 2>&1 || {
   echo "Reindex failed." >&2
   exit 1
 }
+
+# ── Preflight catalog check ──────────────────────────────────────────────
+# Verify the catalog has the expected tools before running benchmarks.
+# Without this, a broken MCPJungle setup silently produces meaningless results.
+
+if [[ "$SKIP_PREFLIGHT" == "true" ]]; then
+  echo "Preflight: skipped (--skip-preflight)"
+else
+
+echo "Preflight: verifying catalog..."
+PREFLIGHT_FAIL=""
+for query in "echo" "time"; do
+  HITS=$(LAZY_TOOL_CONFIG="$LAZY_CONFIG" "$LAZY_BINARY" search "$query" --limit 3 2>/dev/null \
+    | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('results',[])))" 2>/dev/null || echo "0")
+  if [[ "$HITS" == "0" ]]; then
+    PREFLIGHT_FAIL="${PREFLIGHT_FAIL}  - search '$query' returned 0 results\n"
+  else
+    echo "  search '$query': $HITS hit(s) — ok"
+  fi
+done
+
+if [[ -n "$PREFLIGHT_FAIL" ]]; then
+  echo "" >&2
+  echo "ERROR: Preflight catalog check failed:" >&2
+  echo -e "$PREFLIGHT_FAIL" >&2
+  echo "The catalog does not contain expected tools." >&2
+  echo "Check that MCPJungle is running and sample MCPs are registered:" >&2
+  echo "  benchmark/mcpjungle-dev/register-samples.sh" >&2
+  echo "Then re-run: LAZY_TOOL_CONFIG=$LAZY_CONFIG $LAZY_BINARY reindex" >&2
+  exit 1
+fi
+echo "Preflight passed."
+
+fi  # end skip-preflight guard
 
 # ── Prepare filesystem fixture ───────────────────────────────────────────
 

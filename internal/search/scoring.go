@@ -20,7 +20,7 @@ func scoreLexical(needle string, tokens []string, rec *models.CapabilityRecord) 
 	}
 
 	on := strings.ToLower(rec.OriginalName)
-	sum := strings.ToLower(rec.GeneratedSummary)
+	sum := strings.ToLower(rec.EffectiveSummary())
 	src := strings.ToLower(rec.SourceID)
 
 	if needle != "" {

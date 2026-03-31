@@ -52,13 +52,54 @@ Publishing honest benchmark claims is part of the project's reputation.
 
 ## Environment
 
-Recommended local environment:
+### Prerequisites
 
-- MCPJungle running locally (for baseline mode)
-- sample local MCPs registered
-- `lazy-tool` built from the repo root
-- valid `benchmark/configs/mcpjungle-lazy-tool.yaml`
+- Go 1.25+ (to build lazy-tool)
+- Node.js / npx (for the `everything` and `filesystem` MCP servers)
+- Python 3.11+ (for the benchmark harnesses)
+- [uv](https://docs.astral.sh/uv/) (recommended, for `mcp-server-time` via `uvx`)
 - At least one of: `GROQ_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`
+- For weak-model benchmarks: [Ollama](https://ollama.com) running locally with at least one model pulled
+
+### Setting up MCPJungle
+
+The benchmarks use [MCPJungle](https://github.com/mcpjungle/MCPJungle) as the upstream MCP gateway that hosts the test tools. Baseline mode connects directly to MCPJungle; search and direct modes connect through lazy-tool which indexes MCPJungle's catalog.
+
+**1. Install MCPJungle:**
+
+```bash
+# See https://github.com/mcpjungle/MCPJungle for full install instructions
+go install github.com/mcpjungle/mcpjungle@latest
+```
+
+**2. Start MCPJungle:**
+
+```bash
+mcpjungle serve
+# Default: http://127.0.0.1:8080/mcp (strong model suite)
+# Or configure a different port and pass --jungle-url to the benchmark scripts
+```
+
+**3. Register the sample MCP servers:**
+
+```bash
+./benchmark/mcpjungle-dev/register-samples.sh
+```
+
+This registers three MCP servers into MCPJungle:
+
+| Server | Transport | What it provides | Requires |
+|--------|-----------|-----------------|----------|
+| `everything` | stdio | echo tool, prompts, resources (MCP reference server) | npx |
+| `filesystem` | stdio | read/write/list tools scoped to `/tmp/lazy-tool-mcpjungle-fs` | npx |
+| `time` | stdio | time conversion tools | uvx |
+
+**4. Verify tools are registered:**
+
+```bash
+mcpjungle list tools
+# Should show tools from everything, filesystem, and time servers
+```
 
 ### Python dependencies
 
@@ -70,6 +111,14 @@ uv pip install --python benchmark/.venv/bin/python -r benchmark/requirements.txt
 
 # or using pip
 pip install -r benchmark/requirements.txt
+```
+
+### Weak-model setup (Ollama)
+
+```bash
+# Install Ollama: https://ollama.com
+ollama serve                    # start the server
+ollama pull qwen2.5:3b          # pull at least one model
 ```
 
 ## Quick reproducible flow
@@ -326,9 +375,17 @@ Keep raw artifacts around when updating public benchmark claims.
 ### `search_tools_smoke` returns zero hits
 
 Usually:
+- MCPJungle is not running or sample MCPs are not registered (see [Setting up MCPJungle](#setting-up-mcpjungle))
 - you forgot `reindex`
 - your source config is wrong
 - the indexed catalog is stale or empty
+
+Verify with:
+```bash
+export LAZY_TOOL_CONFIG=$PWD/benchmark/configs/mcpjungle-lazy-tool.yaml
+./bin/lazy-tool reindex
+./bin/lazy-tool search "echo" --limit 5
+```
 
 ### routed task chooses the wrong wrapper
 

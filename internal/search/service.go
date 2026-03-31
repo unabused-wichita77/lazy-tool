@@ -376,9 +376,10 @@ func (s *Service) buildCandidates(ctx context.Context, q models.SearchQuery, nee
 		}
 	}
 
-	// Substring scan over the full catalog: only when FTS did not already return hits.
-	// If BM25 returned candidates, repeating a per-row substring pass is redundant for normal queries.
-	if match != "" && len(ftsIDs) > 0 {
+	// Substring scan over the full catalog: skip only when FTS returned enough candidates
+	// to fill the request. When FTS returns sparse results (fewer than limit), augment with
+	// substring scan so that near-matches are not lost to BM25 ranking gaps.
+	if match != "" && len(ftsIDs) >= q.Limit {
 		metrics.SearchCandidateGeneration(models.SearchCandidatePathSubstringSkippedFTSHit)
 		return out, models.SearchCandidatePathSubstringSkippedFTSHit, nil
 	}
@@ -388,9 +389,14 @@ func (s *Service) buildCandidates(ctx context.Context, q models.SearchQuery, nee
 		return out, models.SearchCandidatePathFullCatalogSubstringDisabled, nil
 	}
 
-	subPath := models.SearchCandidatePathSubstringFullCatalogFTSZeroRows
-	if match == "" {
+	var subPath string
+	switch {
+	case match == "":
 		subPath = models.SearchCandidatePathSubstringFullCatalogNoFTSMatch
+	case len(ftsIDs) == 0:
+		subPath = models.SearchCandidatePathSubstringFullCatalogFTSZeroRows
+	default:
+		subPath = models.SearchCandidatePathSubstringAugmentedFTSSparse
 	}
 	metrics.SearchCandidateGeneration(subPath)
 	subIDs, err := s.Store.ListIDsBySearchTextSubstring(ctx, needle, q.SourceIDs)

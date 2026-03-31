@@ -2,7 +2,8 @@ package models
 
 // Lexical candidate-gathering paths (RankedResults.CandidatePath). Stable for logs and clients.
 const (
-	SearchCandidatePathSubstringSkippedFTSHit = "substring_scan_skipped_fts_hit"
+	SearchCandidatePathSubstringSkippedFTSHit      = "substring_scan_skipped_fts_hit"
+	SearchCandidatePathSubstringAugmentedFTSSparse = "substring_scan_augmented_fts_sparse"
 	// SearchCandidatePathSubstringFullCatalogNoFTSMatch is used when FTS MATCH is empty (no ≥2-char tokens), so BM25 is skipped and SQL substring match on search_text runs.
 	SearchCandidatePathSubstringFullCatalogNoFTSMatch = "substring_scan_full_catalog_no_fts_match"
 	// SearchCandidatePathSubstringFullCatalogFTSZeroRows is used when MATCH is non-empty but BM25 returned zero rows; SQL substring match on search_text runs as fallback.

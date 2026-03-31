@@ -3,6 +3,7 @@ package search
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -205,6 +206,64 @@ func TestService_Search_userSummaryBoost(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected user:edited-summary in why_matched: %#v", out.Results[0].WhyMatched)
+	}
+}
+
+func TestService_Search_userSummaryContentMatchesLexical(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "s.db")
+	st, err := storage.OpenSQLite(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+
+	// Two tools with identical generated summaries. Only "b" has a user summary
+	// containing the search term "email". The lexical scorer should rank "b"
+	// higher because its effective summary matches the query.
+	a := models.CapabilityRecord{
+		ID: "a", Kind: models.CapabilityKindTool, SourceID: "s", SourceType: "gateway",
+		CanonicalName: "s__a", OriginalName: "a_tool",
+		GeneratedSummary: "generic helper utility",
+		SearchText:       "s a_tool generic helper utility email", VersionHash: "1", LastSeenAt: time.Now(),
+		InputSchemaJSON: "{}", MetadataJSON: "{}",
+	}
+	b := models.CapabilityRecord{
+		ID: "b", Kind: models.CapabilityKindTool, SourceID: "s", SourceType: "gateway",
+		CanonicalName: "s__b", OriginalName: "b_tool",
+		GeneratedSummary: "generic helper utility",
+		UserSummary:      "sends email notifications to users",
+		SearchText:       "s b_tool generic helper utility sends email notifications", VersionHash: "2", LastSeenAt: time.Now(),
+		InputSchemaJSON: "{}", MetadataJSON: "{}",
+	}
+	if err := st.UpsertCapability(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertCapability(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(st, nil, embeddings.Noop{}, DefaultScoreWeights(), false)
+	out, err := svc.Search(ctx, models.SearchQuery{Text: "email", Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Results) < 1 {
+		t.Fatal("expected at least 1 result")
+	}
+	// "b" should rank first because its effective summary (user summary) contains "email"
+	if out.Results[0].CapabilityID != b.ID {
+		t.Fatalf("user summary content should boost relevance; want b first, got %+v", out.Results)
+	}
+	// Verify the summary match signal is present
+	found := false
+	for _, w := range out.Results[0].WhyMatched {
+		if strings.Contains(w, "summary:") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected summary: signal in why_matched: %v", out.Results[0].WhyMatched)
 	}
 }
 

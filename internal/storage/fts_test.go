@@ -170,3 +170,22 @@ func TestGetCapabilitiesByIDs(t *testing.T) {
 		t.Fatalf("%+v", m)
 	}
 }
+
+func TestFTS_singleCharQueryReturnsEmptyMatch(t *testing.T) {
+	// Single-char queries produce empty FTS MATCH strings by design.
+	// The search pipeline falls back to substring scan for these.
+	match := BuildFTSMatchQuery("a")
+	if match != "" {
+		t.Fatalf("single-char query should produce empty match, got %q", match)
+	}
+	// Two-char tokens should work normally.
+	match = BuildFTSMatchQuery("ab")
+	if match == "" {
+		t.Fatal("two-char query should produce non-empty match")
+	}
+	// Mixed: only 2+ char tokens survive.
+	match = BuildFTSMatchQuery("a bc d ef")
+	if match != `"bc" AND "ef"` {
+		t.Fatalf("want only 2+ char tokens, got %q", match)
+	}
+}
